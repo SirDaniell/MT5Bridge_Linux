@@ -1,0 +1,76 @@
+FROM debian:bookworm-slim
+
+# Install base dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    ca-certificates \
+    wget \
+    gnupg2 \
+    apt-transport-https \
+    && rm -rf /var/lib/apt/lists/*
+
+# Enable multiarch
+RUN dpkg --add-architecture i386
+
+# Add WineHQ repository
+RUN mkdir -pm755 /etc/apt/keyrings && \
+    wget -O /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key && \
+    wget -NP /etc/apt/sources.list.d/ https://dl.winehq.org/wine-builds/debian/dists/bookworm/winehq-bookworm.sources
+
+# Install Wine and dependencies (NO Xvfb - will use host display)
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --install-recommends \
+    winehq-stable=10.0.0.0~bookworm-1 \
+    wine-stable=10.0.0.0~bookworm-1 \
+    wine-stable-i386=10.0.0.0~bookworm-1 \
+    wine-stable-amd64=10.0.0.0~bookworm-1 \
+    xvfb \
+    xdotool \
+    curl \
+    procps \
+    unzip \
+    python3 \
+    python3-pip \
+    winbind \
+    cabextract \
+    sudo \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Winetricks manually
+RUN wget -q https://raw.githubusercontent.com/Winetricks/winetricks/master/src/winetricks -O /usr/local/bin/winetricks && \
+    chmod +x /usr/local/bin/winetricks
+
+WORKDIR /app
+
+# Download Python and pip (will extract at runtime)
+RUN wget -q https://www.python.org/ftp/python/3.10.11/python-3.10.11-embed-amd64.zip -O /app/python.zip && \
+    wget -q https://bootstrap.pypa.io/get-pip.py -O /app/get-pip.py
+
+# Copy application files
+COPY mt5_bridge.py /app/mt5_bridge.py
+COPY startup.sh /startup.sh
+RUN chmod +x /startup.sh
+
+# Create directories
+RUN mkdir -p /var/log/mt5
+
+# Create non-root user for Wine (Wine works better as non-root)
+RUN useradd -m -s /bin/bash wineuser && \
+    chown -R wineuser:wineuser /app && \
+    echo "wineuser ALL=(ALL) NOPASSWD: /bin/chown" >> /etc/sudoers
+
+# Set environment variables
+ENV WINEPREFIX=/home/wineuser/.wine
+ENV WINEARCH=win64
+# DISPLAY should be set in docker-compose.yml to match host display
+ENV WINEDEBUG=-all
+
+# Switch to wineuser
+USER wineuser
+
+EXPOSE 5000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=240s --retries=3 \
+    CMD curl -f http://localhost:5000/test || exit 1
+
+CMD ["/startup.sh"]
