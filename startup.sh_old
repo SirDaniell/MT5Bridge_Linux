@@ -22,24 +22,18 @@ if [ ! -d "$XDG_RUNTIME_DIR" ]; then
     chmod 700 "$XDG_RUNTIME_DIR"
 fi
 
-# Check if DISPLAY is set (required for host X11)
+# Check if DISPLAY is set, if not, start Xvfb
 if [ -z "$DISPLAY" ]; then
-    echo "❌ ERROR: DISPLAY environment variable not set"
-    echo ""
-    echo "This container requires host X11 display for MT5 terminal."
-    echo "Please run the following on your host machine:"
-    echo ""
-    echo "  xhost +local:docker"
-    echo "  export DISPLAY=:0"
-    echo ""
-    echo "Then restart the container with:"
-    echo "  docker-compose restart mt5-bridge"
-    echo ""
-    exit 1
+    echo "🖥️  DISPLAY not set, starting Xvfb..."
+    Xvfb :99 -screen 0 1024x768x16 -ac +extension GLX +render -noreset &
+    XVFB_PID=$!
+    export DISPLAY=:99
 else
     echo "🖥️  Using Host Display: $DISPLAY"
-    echo "================================================"
 fi
+
+# Wait for Xvfb to be ready
+sleep 3
 
 echo "Wine Prefix: $WINEPREFIX"
 echo "Display: $DISPLAY"
@@ -50,6 +44,7 @@ cleanup() {
     echo ""
     echo "🧹 Cleaning up..."
     wineserver -k 2>/dev/null || true
+    kill $XVFB_PID 2>/dev/null || true
     echo "✅ Cleanup complete"
 }
 trap cleanup EXIT INT TERM
@@ -149,6 +144,11 @@ install_component "corefonts"
 # Visual C++ runtime (essential for MT5 and Python packages)
 install_component "vcrun2015"
 
+# Skip msxml3 and msxml6 if they cause hangs - MT5 usually works without them
+# Uncomment if needed:
+# install_component "msxml3"
+# install_component "msxml6"
+
 echo "✅ All Windows components installed"
 echo "================================================"
 
@@ -235,69 +235,13 @@ echo "================================================"
 echo "✅ All initialization complete!"
 echo "================================================"
 
-# Install MT5 Terminal
+# Check for MT5 terminal
 MT5_PATH="$WINEPREFIX/drive_c/Program Files/MetaTrader 5/terminal64.exe"
-if [ ! -f "$MT5_PATH" ]; then
-    echo ""
-    echo "📥 MT5 Terminal not found. Installing..."
-    echo "================================================"
-    
-    # Download MT5 installer
-    INSTALLER_URL="https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe"
-    INSTALLER_PATH="/tmp/mt5setup.exe"
-    
-    echo "  Downloading MT5 installer..."
-    if wget --timeout=60 --tries=3 "$INSTALLER_URL" -O "$INSTALLER_PATH" > /dev/null 2>&1; then
-        echo "  ✅ Download complete"
-        
-        # Check if we have a display for GUI installation
-        if [ -n "$DISPLAY" ]; then
-            echo "  🖥️  Display available: $DISPLAY"
-            echo "  🚀 Launching MT5 installer..."
-            echo ""
-            echo "  ⚠️  IMPORTANT: MT5 installer window will appear on your display"
-            echo "     Please complete the installation manually"
-            echo "     The installer will close automatically when done"
-            echo ""
-            
-            # Run installer (will show on host display)
-            wine "$INSTALLER_PATH" &
-            INSTALLER_PID=$!
-            
-            # Wait for installer to complete (user closes it)
-            echo "  ⏳ Waiting for installation to complete..."
-            wait $INSTALLER_PID 2>/dev/null || true
-            
-            # Give it a moment for files to be written
-            sleep 5
-            
-            # Cleanup
-            rm -f "$INSTALLER_PATH"
-            
-            # Verify installation
-            if [ -f "$MT5_PATH" ]; then
-                echo "  ✅ MT5 terminal installed successfully!"
-                echo "     Location: $MT5_PATH"
-            else
-                echo "  ⚠️  MT5 terminal not found after installation"
-                echo "     Expected at: $MT5_PATH"
-                echo "     You can install it later via POST /install endpoint"
-            fi
-        else
-            echo "  ❌ No DISPLAY available for GUI installation"
-            echo "     Please set DISPLAY environment variable or run:"
-            echo "     xhost +local:docker"
-            echo "     Then restart the container"
-            rm -f "$INSTALLER_PATH"
-        fi
-    else
-        echo "  ❌ Failed to download MT5 installer"
-        echo "     You can install it later via POST /install endpoint"
-    fi
-    
-    echo "================================================"
+if [ -f "$MT5_PATH" ]; then
+    echo "✅ MT5 terminal found at: $MT5_PATH"
 else
-    echo "✅ MT5 Terminal already installed at: $MT5_PATH"
+    echo "⚠️  MT5 terminal not installed"
+    echo "   Install it via POST /install endpoint or manually"
 fi
 
 # Create common.ini to disable wizards and enable AutoTrading
@@ -318,6 +262,8 @@ Enabled=1
 Account=1
 Profile=1
 EOF
+
+# Dialog killer removed by user request
 
 echo "🌉 Starting MT5 Bridge server..."
 cd /app

@@ -17,13 +17,17 @@ RUN mkdir -pm755 /etc/apt/keyrings && \
     wget -O /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key && \
     wget -NP /etc/apt/sources.list.d/ https://dl.winehq.org/wine-builds/debian/dists/bookworm/winehq-bookworm.sources
 
-# Install Wine and dependencies
+# Install Wine and dependencies (NO Xvfb - will use host display)
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --install-recommends \
     winehq-stable=10.0.0.0~bookworm-1 \
     wine-stable=10.0.0.0~bookworm-1 \
     wine-stable-i386=10.0.0.0~bookworm-1 \
     wine-stable-amd64=10.0.0.0~bookworm-1 \
+    xvfb \
+    xdotool \
+    xauth \
+    zenity \
     curl \
     procps \
     unzip \
@@ -58,11 +62,12 @@ RUN mkdir -p /var/log/mt5 && \
 RUN useradd -m -s /bin/bash wineuser && \
     chown -R wineuser:wineuser /app && \
     chown -R wineuser:wineuser /tmp/runtime-wineuser && \
-    echo "wineuser ALL=(ALL) NOPASSWD: /bin/chown, /usr/bin/killall" >> /etc/sudoers
+    echo "wineuser ALL=(ALL) NOPASSWD: /bin/chown" >> /etc/sudoers
 
 # Set environment variables
 ENV WINEPREFIX=/home/wineuser/.wine
 ENV WINEARCH=win64
+# DISPLAY should be set in docker-compose.yml to match host display
 ENV WINEDEBUG=-all
 
 # Switch to wineuser

@@ -20,62 +20,56 @@ logger = logging.getLogger(__name__)
 
 @app.route("/install", methods=["POST"])
 def install_mt5():
-    """Install MT5 terminal if not already installed (fallback from Docker pre-install)"""
+    """Download and install MT5 terminal (will show GUI for user interaction)"""
     try:
         wine_prefix = "/home/wineuser/.wine"
         terminal_unix_path = f"{wine_prefix}/drive_c/Program Files/MetaTrader 5/terminal64.exe"
         
-        # Check if already installed (from Docker pre-install)
+        # Check if already installed
         if os.path.exists(terminal_unix_path):
-            logger.info(f"✅ MT5 terminal found at {terminal_unix_path} (pre-installed)")
-            return jsonify({"success": True, "message": "MT5 terminal is already installed", "path": terminal_unix_path, "already_installed": True})
+            logger.info(f"✅ MT5 terminal found at {terminal_unix_path}")
+            return jsonify({
+                "success": True, 
+                "message": "MT5 terminal is already installed", 
+                "path": terminal_unix_path,
+                "installed": True
+            })
         
-        # Not pre-installed, install now
-        logger.info("MT5 not pre-installed, installing now...")
+        # Download MT5 installer
+        logger.info("📥 Downloading MT5 installer...")
         installer_url = "https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe"
-        installer_unix_path = "/tmp/mt5setup.exe"
+        installer_path = f"{wine_prefix}/drive_c/temp/mt5setup.exe"
         
-        logger.info(f"📥 Downloading MT5 installer from {installer_url}...")
+        os.makedirs(os.path.dirname(installer_path), exist_ok=True)
+        
         response = requests.get(installer_url, stream=True, timeout=300)
         response.raise_for_status()
         
-        with open(installer_unix_path, 'wb') as f:
+        with open(installer_path, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
         
-        logger.info("📦 Installing MT5 terminal via Wine...")
-        env = os.environ.copy()
-        env['DISPLAY'] = ':0'
-        env['WINEPREFIX'] = wine_prefix
+        logger.info("✅ Download complete")
+        logger.info("🚀 Starting MT5 installer (GUI will appear)...")
+        logger.info("   Please complete the installation in the GUI window that appears")
         
-        result = subprocess.run(
-            ["wine", installer_unix_path, "/auto"],
-            capture_output=True,
-            text=True,
-            check=False,
-            env=env,
-            timeout=180
+        # Run installer (will show GUI on host display via X11)
+        # Using subprocess.Popen to run in background and return immediately
+        import subprocess
+        subprocess.Popen(
+            ["wine", installer_path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
         )
         
-        logger.info(f"Installer output: {result.stdout}")
-        if result.stderr:
-            logger.warning(f"Installer stderr: {result.stderr}")
-        
-        # Wait for installation
-        time.sleep(20)
-        
-        # Check if installed successfully
-        if os.path.exists(terminal_unix_path):
-            logger.info(f"✅ MT5 terminal installed successfully at {terminal_unix_path}")
-            os.remove(installer_unix_path)
-            return jsonify({"success": True, "message": "MT5 terminal installed successfully", "path": terminal_unix_path, "already_installed": False})
-        else:
-            logger.error(f"❌ Installation failed - terminal not found at {terminal_unix_path}")
-            return jsonify({"success": False, "error": "Installation completed but MT5 terminal not found. Please check Wine configuration."}), 500
+        return jsonify({
+            "success": True,
+            "message": "MT5 installer started. Please complete the installation in the GUI window.",
+            "path": terminal_unix_path,
+            "installed": False,
+            "gui_started": True
+        })
             
-    except subprocess.TimeoutExpired:
-        logger.error("MT5 installation timed out")
-        return jsonify({"success": False, "error": "Installation timed out after 3 minutes"}), 500
     except Exception as e:
         logger.error(f"Installation error: {str(e)}")
         return jsonify({"success": False, "error": str(e)}), 500
