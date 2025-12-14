@@ -1,4 +1,17 @@
 #!/bin/bash
+# ==============================================================================
+# CRITICAL STABILITY WARNING - DO NOT MODIFY WITHOUT BACKUP
+# ==============================================================================
+# This script handles the delicate initialization of Wine and MT5.
+# 
+# Key behaviors to preserve:
+# 1. Proper Xvfb/Display handling (uses host display if available)
+# 2. Robust Wine prefix initialization with timeouts
+# 3. Winetricks with interactive fallback for GUI
+# 4. Correct Python environment setup in Wine
+# 
+# CHANGES HERE CAN CAUSE "IPC TIMEOUT" OR "FILE NOT FOUND" ERRORS.
+# ==============================================================================
 set -e
 
 echo "🚀 Starting MT5 Bridge initialization..."
@@ -22,23 +35,47 @@ if [ ! -d "$XDG_RUNTIME_DIR" ]; then
     chmod 700 "$XDG_RUNTIME_DIR"
 fi
 
-# Check if DISPLAY is set (required for host X11)
-if [ -z "$DISPLAY" ]; then
-    echo "❌ ERROR: DISPLAY environment variable not set"
-    echo ""
-    echo "This container requires host X11 display for MT5 terminal."
-    echo "Please run the following on your host machine:"
-    echo ""
-    echo "  xhost +local:docker"
-    echo "  export DISPLAY=:0"
-    echo ""
-    echo "Then restart the container with:"
-    echo "  docker-compose restart mt5-bridge"
-    echo ""
-    exit 1
+# Intelligent Display configuration
+USE_XVFB=0
+if [ -n "$DISPLAY" ]; then
+    echo "🖥️  Host Display set: $DISPLAY"
+    echo "🔎 Verifying X11 connection..."
+    
+    # Try to verify X connection using xset (if available) or python
+    if command -v xset &> /dev/null; then
+        if timeout 3 xset q &>/dev/null; then
+             echo "✅ Host Display connection verified"
+        else
+             echo "❌ Host Display connection failed (xset). Falling back to Xvfb..."
+             USE_XVFB=1
+        fi
+    else
+        # Fallback python check if xset missing
+        if python3 -c "import ctypes; l=ctypes.cdll.LoadLibrary('libX11.so.6'); d=l.XOpenDisplay(None); exit(0 if d else 1)" 2>/dev/null; then
+             echo "✅ Host Display connection verified (via Python)"
+        else
+             echo "❌ Host Display connection failed (via Python). Falling back to Xvfb..."
+             USE_XVFB=1
+        fi
+    fi
 else
-    echo "🖥️  Using Host Display: $DISPLAY"
-    echo "================================================"
+    echo "ℹ️  No DISPLAY set"
+    USE_XVFB=1
+fi
+
+if [ "$USE_XVFB" -eq 1 ]; then
+    echo "🖥️  Starting Xvfb (Virtual Display)..."
+    export DISPLAY=:1
+    
+    # Cleanup any stale locks
+    rm -f /tmp/.X1-lock
+    
+    Xvfb :1 -screen 0 1024x768x16 &
+    XVFB_PID=$!
+    echo "✅ Xvfb started on :1 (PID: $XVFB_PID)"
+    
+    # Wait for Xvfb to be ready
+    sleep 2
 fi
 
 echo "Wine Prefix: $WINEPREFIX"
@@ -322,6 +359,7 @@ EOF
 echo "🌉 Starting MT5 Bridge server..."
 cd /app
 
+# Run with waitress for production
 # Run with waitress for production
 exec wine "$WINEPREFIX/drive_c/Python310/python.exe" -m waitress \
     --host=0.0.0.0 \

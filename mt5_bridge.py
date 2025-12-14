@@ -142,7 +142,7 @@ def initialize():
         "path",
         "/home/wineuser/.wine/drive_c/Program Files/MetaTrader 5/terminal64.exe"
     )
-    timeout = data.get("timeout", 60)  # 60 second timeout
+    timeout = data.get("timeout", 300)  # Increase default timeout to 300s (5 mins)
     portable = data.get("portable", False)
 
     if not all([login, password, server]):
@@ -156,35 +156,42 @@ def initialize():
     except ValueError:
         return jsonify({"success": False, "error": "Login must be a number"}), 400
 
-    # Simple initialization - let mt5.initialize() handle terminal startup
     logger.info(f"Initializing MT5 with login={login}, server={server}, path={path}")
+
+    # Retry loop for initialization (Wine often needs a warmup attempt)
+    max_retries = 3
+    last_error = None
     
-    try:
-        logger.info("Initializing MT5...")
-        result = mt5.initialize(
-            path=path,
-            login=login,
-            password=password,
-            server=server,
-            timeout=timeout,
-            portable=portable,
-        )
-        
-        if result:
-            logger.info("MT5 initialized successfully")
-            logger.info(f"MT5 version: {mt5.version()}")
-            terminal_info = mt5.terminal_info()
-            if terminal_info:
-                logger.info(f"Terminal info: {terminal_info}")
-            return jsonify({"success": True})
-        else:
-            error = mt5.last_error()
-            logger.error(f"MT5 initialization failed: {error}")
-            return jsonify({"success": False, "error": str(error)})
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"Initializing MT5 (Attempt {attempt + 1}/{max_retries})...")
+            result = mt5.initialize(
+                path=path,
+                login=login,
+                password=password,
+                server=server,
+                timeout=timeout,
+                portable=portable,
+            )
             
-    except Exception as e:
-        logger.error(f"MT5 initialization exception: {e}")
-        return jsonify({"success": False, "error": str(e)})
+            if result:
+                logger.info("MT5 initialized successfully")
+                logger.info(f"MT5 version: {mt5.version()}")
+                terminal_info = mt5.terminal_info()
+                if terminal_info:
+                    logger.info(f"Terminal info: {terminal_info}")
+                return jsonify({"success": True})
+            else:
+                last_error = mt5.last_error()
+                logger.warning(f"MT5 initialization attempt {attempt + 1} failed: {last_error}")
+                # Wait a bit before retrying
+                time.sleep(2)
+        except Exception as e:
+            last_error = str(e)
+            logger.error(f"MT5 initialization attempt {attempt + 1} exception: {e}")
+            time.sleep(2)
+
+    return jsonify({"success": False, "error": f"Failed after {max_retries} attempts. Last error: {last_error}"}), 500
 
 
 @app.route("/get_account_info", methods=["GET"])
@@ -669,10 +676,6 @@ def test_endpoint():
 if __name__ == "__main__":
     # Don't initialize MT5 on startup - it requires credentials
     # MT5 will be initialized when /initialize endpoint is called
-    result = mt5.initialize()
-    print(f"Initial MT5 initialization: {result}")
-    if result:
-        print(f"Terminal info: {mt5.terminal_info()}")
     logger.info("Starting MT5 Bridge Flask server...")
     
     import os

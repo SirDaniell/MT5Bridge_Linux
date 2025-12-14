@@ -1,6 +1,19 @@
-FROM debian:bookworm-slim
+# ==============================================================================
+# CRITICAL STABILITY WARNING - DO NOT MODIFY WITHOUT BACKUP
+# ==============================================================================
+# This Dockerfile implements a specific, proven configuration for running MT5 on 
+# Linux via Wine with GUI support. 
+# 
+# Key Requirements Preserved Here:
+# 1. User switching (root -> wineuser) happens in Dockerfile, NOT startup script
+# 2. Uses python-embed zip instead of installer
+# 3. Explicitly installs Wine 10.0+ from WineHQ
+# 4. Supports host X11 display forwarding for installer GUI
+# 
+# IF YOU MODIFY THIS, YOU RISK BREAKING THE BRIDGE.
+# ==============================================================================
 
-# Install base dependencies
+FROM debian:bookworm-slim
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -32,6 +45,8 @@ RUN apt-get update && \
     winbind \
     cabextract \
     sudo \
+    xvfb \
+    x11-xserver-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Winetricks manually
