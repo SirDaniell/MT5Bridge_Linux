@@ -2,16 +2,6 @@
 # ==============================================================================
 # CRITICAL STABILITY WARNING - DO NOT MODIFY WITHOUT BACKUP
 # ==============================================================================
-# This script handles the delicate initialization of Wine and MT5.
-# 
-# Key behaviors to preserve:
-# 1. Proper Xvfb/Display handling (uses host display if available)
-# 2. Robust Wine prefix initialization with timeouts
-# 3. Winetricks with interactive fallback for GUI
-# 4. Correct Python environment setup in Wine
-# 
-# CHANGES HERE CAN CAUSE "IPC TIMEOUT" OR "FILE NOT FOUND" ERRORS.
-# ==============================================================================
 set -e
 
 echo "🚀 Starting MT5 Bridge initialization..."
@@ -41,22 +31,13 @@ if [ -n "$DISPLAY" ]; then
     echo "🖥️  Host Display set: $DISPLAY"
     echo "🔎 Verifying X11 connection..."
     
-    # Try to verify X connection using xset (if available) or python
-    if command -v xset &> /dev/null; then
-        if timeout 3 xset q &>/dev/null; then
-             echo "✅ Host Display connection verified"
-        else
-             echo "❌ Host Display connection failed (xset). Falling back to Xvfb..."
-             USE_XVFB=1
-        fi
+    # Try to verify X connection using python (more reliable than xset)
+    if python3 -c "import ctypes; l=ctypes.cdll.LoadLibrary('libX11.so.6'); d=l.XOpenDisplay(None); exit(0 if d else 1)" 2>/dev/null; then
+         echo "✅ Host Display connection verified"
     else
-        # Fallback python check if xset missing
-        if python3 -c "import ctypes; l=ctypes.cdll.LoadLibrary('libX11.so.6'); d=l.XOpenDisplay(None); exit(0 if d else 1)" 2>/dev/null; then
-             echo "✅ Host Display connection verified (via Python)"
-        else
-             echo "❌ Host Display connection failed (via Python). Falling back to Xvfb..."
-             USE_XVFB=1
-        fi
+         echo "⚠️  Host Display connection failed. Falling back to Xvfb..."
+         echo "    To use host display, run: xhost +local:docker"
+         USE_XVFB=1
     fi
 else
     echo "ℹ️  No DISPLAY set"
@@ -124,223 +105,218 @@ else
     echo "✅ Wine prefix already exists"
 fi
 
-# Test Wine
-echo "🧪 Testing Wine..."
+# Test Wine Functionality
+echo "🧪 Testing Wine functionality..."
+if ! wine cmd /c ver &> /dev/null; then
+    echo "❌ Wine is broken or prefix is corrupted."
+    echo "🧹 Wiping corrupted prefix..."
+    
+    wineserver -k9 2>/dev/null || true
+    sudo killall -9 wineserver wine wine64 2>/dev/null || true
+    rm -rf "$WINEPREFIX"
+    
+    if [ -d "$WINEPREFIX" ]; then
+        echo "❌ Failed to delete prefix. Check permissions."
+        exit 1
+    fi
+    echo "✅ Prefix wiped. Please restart container."
+    exit 1
+fi
+
 wine --version || {
-    echo "❌ Wine not available"
+    echo "❌ Wine binary not found"
     exit 1
 }
 echo "✅ Wine is working"
 
-# Function to install winetricks component with aggressive timeout handling
+# Function to install winetricks component
 install_component() {
     local component=$1
     echo ""
     echo "📦 Installing $component..."
     
-    # Kill any hanging processes first
     wineserver -k 2>/dev/null || true
     sleep 1
     
-    # Run winetricks with timeout
     if ! timeout 180 bash -c "WINEDEBUG=-all winetricks -q $component 2>&1 | grep -v 'fixme:' | tail -n 5"; then
-        echo "⚠️  $component silent installation failed or timed out."
+        echo "⚠️  $component installation timed out or failed"
         
-        # Check if we have a display to show UI
-        if [ -n "$DISPLAY" ]; then
-            echo "🖥️  Display detected ($DISPLAY). Attempting interactive installation..."
-            
-            # Notify user if zenity is available
-            if command -v zenity &> /dev/null; then
-                zenity --info --text="Silent installation of $component failed.\n\nPlease complete the installation manually in the window that appears." --title="MT5 Bridge Setup" --timeout=10 &
-            fi
-            
-            # Try interactive installation
+        if [ -n "$DISPLAY" ] && [ "$USE_XVFB" -eq 0 ]; then
+            echo "🖥️  Attempting interactive installation..."
             wineserver -k 2>/dev/null || true
             sleep 1
             winetricks $component || {
-                echo "❌ Interactive installation of $component failed."
+                echo "❌ Interactive installation failed"
                 return 1
             }
-        else
-            echo "❌ No display available for interactive fallback."
-            return 1
         fi
     fi
     
-    # Force wineserver cleanup
     timeout 30 wineserver -w || wineserver -k9
     sleep 2
     
     echo "✅ $component installation complete"
 }
 
-# Install Windows components (only essential ones to save time)
+# Install Windows components
 echo ""
 echo "🍷 Installing Windows components..."
 echo "================================================"
 
-# Core fonts (essential for MT5)
 install_component "corefonts"
-
-# Visual C++ runtime (essential for MT5 and Python packages)
 install_component "vcrun2015"
 
 echo "✅ All Windows components installed"
 echo "================================================"
 
-# Final aggressive cleanup
+# Final cleanup
 echo "🧹 Final Wine cleanup..."
 wineserver -k9 2>/dev/null || true
 sudo killall -9 wineserver wine wine64 2>/dev/null || true
 sleep 3
 
-# Setup Python in Wine if not exists
-if [ ! -f "$WINEPREFIX/drive_c/Python310/python.exe" ]; then
+# Setup Python in Wine
+PYTHON_DIR="$WINEPREFIX/drive_c/Python310"
+
+if [ ! -f "$PYTHON_DIR/python.exe" ]; then
     echo ""
     echo "📦 Setting up Python in Wine..."
     echo "================================================"
     
     # Extract Python
-    mkdir -p "$WINEPREFIX/drive_c/Python310"
-    unzip -q /app/python.zip -d "$WINEPREFIX/drive_c/Python310"
+    mkdir -p "$PYTHON_DIR"
+    unzip -q /app/python.zip -d "$PYTHON_DIR"
     
-    # Verify extraction
-    if [ ! -f "$WINEPREFIX/drive_c/Python310/python.exe" ]; then
+    if [ ! -f "$PYTHON_DIR/python.exe" ]; then
         echo "❌ Python extraction failed"
         exit 1
     fi
     echo "✅ Python extracted"
     
-    # Configure Python to enable site-packages
-    if [ -f "$WINEPREFIX/drive_c/Python310/python310._pth" ]; then
-        sed -i 's/#import site/import site/' "$WINEPREFIX/drive_c/Python310/python310._pth"
+    # Enable site-packages
+    if [ -f "$PYTHON_DIR/python310._pth" ]; then
+        sed -i 's/#import site/import site/' "$PYTHON_DIR/python310._pth"
         echo "✅ Python site-packages enabled"
     fi
-    
-    # Install pip
-    echo "📦 Installing pip..."
-    cp /app/get-pip.py "$WINEPREFIX/drive_c/Python310/"
-    
-    WINEDEBUG=-all wine "$WINEPREFIX/drive_c/Python310/python.exe" "$WINEPREFIX/drive_c/Python310/get-pip.py" --no-warn-script-location 2>&1 | grep -v "fixme:" | tail -n 3
-    timeout 45 wineserver -w || wineserver -k9
-    sleep 2
-    echo "✅ pip installed"
-    
-    # Install Python packages one by one
-    echo "📦 Installing numpy..."
-    WINEDEBUG=-all wine "$WINEPREFIX/drive_c/Python310/python.exe" -m pip install --no-warn-script-location "numpy==1.24.3" 2>&1 | grep -v "fixme:" | tail -n 3
-    timeout 45 wineserver -w || wineserver -k9
-    sleep 2
-    echo "✅ numpy installed"
-
-    echo "📦 Installing requests..."
-    WINEDEBUG=-all wine "$WINEPREFIX/drive_c/Python310/python.exe" -m pip install --no-warn-script-location "requests"
-    timeout 45 wineserver -w || wineserver -k9
-    sleep 2
-    echo "✅ requests installed"
-    
-    echo "📦 Installing MetaTrader5..."
-    WINEDEBUG=-all wine "$WINEPREFIX/drive_c/Python310/python.exe" -m pip install --no-warn-script-location "MetaTrader5" 2>&1 | grep -v "fixme:" | tail -n 3
-    timeout 45 wineserver -w || wineserver -k9
-    sleep 2
-    echo "✅ MetaTrader5 installed"
-    
-    echo "📦 Installing Flask and waitress..."
-    WINEDEBUG=-all wine "$WINEPREFIX/drive_c/Python310/python.exe" -m pip install --no-warn-script-location Flask waitress 2>&1 | grep -v "fixme:" | tail -n 3
-    timeout 45 wineserver -w || wineserver -k9
-    sleep 2
-    echo "✅ Flask and waitress installed"
-    
-    echo "================================================"
-    echo "✅ Python setup complete"
-else
-    echo "✅ Python already installed in Wine"
 fi
 
-# Test Python
-echo ""
-echo "🧪 Testing Wine Python..."
-wine "$WINEPREFIX/drive_c/Python310/python.exe" --version
+# ALWAYS check and install pip if missing (THIS IS THE FIX!)
+echo "📦 Checking pip installation..."
+if [ ! -f "$PYTHON_DIR/Scripts/pip.exe" ]; then
+    echo "   Installing pip..."
+    cp /app/get-pip.py "$PYTHON_DIR/"
+    
+    WINEDEBUG=-all wine "$PYTHON_DIR/python.exe" "$PYTHON_DIR/get-pip.py" --no-warn-script-location 2>&1 | tail -n 5
+    timeout 45 wineserver -w || wineserver -k9
+    sleep 2
+    
+    if [ ! -f "$PYTHON_DIR/Scripts/pip.exe" ]; then
+        echo "❌ CRITICAL: Pip installation failed!"
+        exit 1
+    fi
+    echo "✅ Pip installed"
+else
+    echo "✅ Pip already installed"
+fi
 
-# Test MT5 import
-echo "🧪 Testing MetaTrader5 import..."
-wine "$WINEPREFIX/drive_c/Python310/python.exe" -c "import MetaTrader5 as mt5; print('✅ MT5 imported successfully')" 2>&1 | grep -v "fixme:"
+# Install/verify Python packages
+echo ""
+echo "📦 Verifying Python dependencies..."
+echo "================================================"
+
+# Function to check and install package
+install_if_missing() {
+    local package=$1
+    local import_name=${2:-$package}
+    
+    if ! wine "$PYTHON_DIR/python.exe" -c "import ${import_name}" 2>/dev/null; then
+        echo "   Installing ${package}..."
+        WINEDEBUG=-all wine "$PYTHON_DIR/python.exe" -m pip install --no-warn-script-location "${package}" 2>&1 | tail -n 3
+        timeout 45 wineserver -w || wineserver -k9
+        sleep 2
+        echo "   ✅ ${package} installed"
+    else
+        echo "   ✅ ${package} ready"
+    fi
+}
+
+install_if_missing "numpy==1.24.3" "numpy"
+install_if_missing "requests" "requests"
+install_if_missing "MetaTrader5" "MetaTrader5"
+install_if_missing "Flask" "flask"
+install_if_missing "waitress" "waitress"
+
+echo "================================================"
+echo "✅ All Python packages verified"
+
+# Test imports
+echo ""
+echo "🧪 Testing Python environment..."
+wine "$PYTHON_DIR/python.exe" --version
+wine "$PYTHON_DIR/python.exe" -c "import MetaTrader5 as mt5; print('✅ MT5 import successful')" 2>&1 | grep -v "fixme:"
+wine "$PYTHON_DIR/python.exe" -c "import waitress; print('✅ Waitress import successful')" 2>&1 | grep -v "fixme:"
 
 echo ""
 echo "================================================"
 echo "✅ All initialization complete!"
 echo "================================================"
 
-# Install MT5 Terminal
+# MT5 Terminal Installation
 MT5_PATH="$WINEPREFIX/drive_c/Program Files/MetaTrader 5/terminal64.exe"
 if [ ! -f "$MT5_PATH" ]; then
     echo ""
-    echo "📥 MT5 Terminal not found. Installing..."
+    echo "📥 MT5 Terminal not found. Downloading installer..."
     echo "================================================"
     
-    # Download MT5 installer
     INSTALLER_URL="https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe"
     INSTALLER_PATH="/tmp/mt5setup.exe"
     
-    echo "  Downloading MT5 installer..."
     if wget --timeout=60 --tries=3 "$INSTALLER_URL" -O "$INSTALLER_PATH" > /dev/null 2>&1; then
-        echo "  ✅ Download complete"
+        echo "✅ Download complete"
         
-        # Check if we have a display for GUI installation
-        if [ -n "$DISPLAY" ]; then
-            echo "  🖥️  Display available: $DISPLAY"
-            echo "  🚀 Launching MT5 installer..."
+        if [ "$USE_XVFB" -eq 0 ]; then
             echo ""
-            echo "  ⚠️  IMPORTANT: MT5 installer window will appear on your display"
-            echo "     Please complete the installation manually"
-            echo "     The installer will close automatically when done"
+            echo "🖥️  GUI INSTALLATION MODE"
+            echo "================================================"
+            echo "⚠️  The MT5 installer will appear on your display: $DISPLAY"
+            echo "    Please complete the installation manually."
+            echo "    The container will wait for you to finish."
+            echo "================================================"
             echo ""
             
-            # Run installer (will show on host display)
+            # Launch installer and wait
             wine "$INSTALLER_PATH" &
             INSTALLER_PID=$!
-            
-            # Wait for installer to complete (user closes it)
-            echo "  ⏳ Waiting for installation to complete..."
             wait $INSTALLER_PID 2>/dev/null || true
-            
-            # Give it a moment for files to be written
             sleep 5
             
-            # Cleanup
-            rm -f "$INSTALLER_PATH"
-            
-            # Verify installation
             if [ -f "$MT5_PATH" ]; then
-                echo "  ✅ MT5 terminal installed successfully!"
-                echo "     Location: $MT5_PATH"
+                echo "✅ MT5 installed successfully!"
             else
-                echo "  ⚠️  MT5 terminal not found after installation"
-                echo "     Expected at: $MT5_PATH"
-                echo "     You can install it later via POST /install endpoint"
+                echo "⚠️  MT5 not found. You can install later via /install endpoint"
             fi
         else
-            echo "  ❌ No DISPLAY available for GUI installation"
-            echo "     Please set DISPLAY environment variable or run:"
-            echo "     xhost +local:docker"
-            echo "     Then restart the container"
-            rm -f "$INSTALLER_PATH"
+            echo "ℹ️  Running in headless mode (Xvfb)"
+            echo "   To install MT5 with GUI, restart with:"
+            echo "   1. xhost +local:docker (on host)"
+            echo "   2. Set DISPLAY=:0 in docker-compose.yml"
+            echo ""
+            echo "   Or install later via: POST /install"
         fi
+        
+        rm -f "$INSTALLER_PATH"
     else
-        echo "  ❌ Failed to download MT5 installer"
-        echo "     You can install it later via POST /install endpoint"
+        echo "⚠️  Download failed. Install later via /install endpoint"
     fi
     
     echo "================================================"
 else
-    echo "✅ MT5 Terminal already installed at: $MT5_PATH"
+    echo "✅ MT5 Terminal already installed"
 fi
 
-# Create common.ini to disable wizards and enable AutoTrading
+# Create MT5 config
 CONFIG_DIR="$WINEPREFIX/drive_c/Program Files/MetaTrader 5/config"
 mkdir -p "$CONFIG_DIR"
-echo "⚙️ Forcing common.ini configuration..."
 cat <<EOF > "$CONFIG_DIR/common.ini"
 [Common]
 NewsEnable=0
@@ -356,12 +332,11 @@ Account=1
 Profile=1
 EOF
 
+echo ""
 echo "🌉 Starting MT5 Bridge server..."
 cd /app
 
-# Run with waitress for production
-# Run with waitress for production
-exec wine "$WINEPREFIX/drive_c/Python310/python.exe" -m waitress \
+exec wine "$PYTHON_DIR/python.exe" -m waitress \
     --host=0.0.0.0 \
     --port=5000 \
     --threads=4 \

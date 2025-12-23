@@ -162,34 +162,107 @@ def initialize():
     max_retries = 3
     last_error = None
     
+    # Aggressive Cleanup: Kill any existing terminal processes first
+    try:
+        logger.info("🧹 Pre-init cleanup: Killing existing terminal64.exe processes...")
+        subprocess.run(["killall", "terminal64.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(2) # Give it time to die
+    except Exception as e:
+        logger.warning(f"Cleanup warning: {e}")
+
     for attempt in range(max_retries):
         try:
             logger.info(f"Initializing MT5 (Attempt {attempt + 1}/{max_retries})...")
+            
+            # Ensure path exists
+            if not os.path.exists(path):
+                logger.error(f"MT5 executable not found at: {path}")
+                return jsonify({"success": False, "error": f"MT5 executable not found at {path}"}), 404
+
+            # MANUAL LAUNCH STRATEGY
+            # Launch terminal manually with specific flags to ensure it starts correctly in Wine
+            # This bypasses issues where mt5.initialize() times out waiting for the GUI
+            if attempt == 0: # Only try manual launch on first attempt
+                logger.info("🚀 Manually launching terminal process...")
+                config_path = os.path.join(os.path.dirname(os.path.dirname(path)), "config", "common.ini")
+                
+                launch_cmd = [
+                    "wine", 
+                    path, 
+                    "/portable",
+                    f"/login:{login}",
+                    f"/password:{password}",
+                    f"/server:{server}",
+                ]
+                
+                if os.path.exists(config_path):
+                     launch_cmd.append(f"/config:{config_path}")
+                
+                # Verify environment variables
+                logger.info(f"Launch env: WINEPREFIX={os.environ.get('WINEPREFIX')}")
+                
+                # Launch in background
+                subprocess.Popen(
+                    launch_cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True
+                )
+                
+                # Wait for it to warm up (Wine is slow)
+                logger.info("⏳ Waiting 15s for terminal to warm up...")
+                time.sleep(15)
+
+            # Now try to attach/initialize
             result = mt5.initialize(
                 path=path,
                 login=login,
                 password=password,
                 server=server,
                 timeout=timeout,
-                portable=portable,
+                portable=True, # Force portable since we launched it that way
             )
             
             if result:
                 logger.info("MT5 initialized successfully")
-                logger.info(f"MT5 version: {mt5.version()}")
+                version = mt5.version()
+                logger.info(f"MT5 version: {version}")
+                
+                # Verify account connection status
                 terminal_info = mt5.terminal_info()
                 if terminal_info:
                     logger.info(f"Terminal info: {terminal_info}")
-                return jsonify({"success": True})
+                    if terminal_info.connected:
+                         logger.info("✅ Terminal connected to broker server")
+                    else:
+                         logger.warning("⚠️ Terminal initialized but NOT connected to broker server")
+                else:
+                    # Sometimes info is None immediately after init
+                    time.sleep(1)
+                    terminal_info = mt5.terminal_info()
+
+                return jsonify({
+                    "success": True, 
+                    "connected": terminal_info.connected if terminal_info else False,
+                    "version": version
+                })
             else:
                 last_error = mt5.last_error()
                 logger.warning(f"MT5 initialization attempt {attempt + 1} failed: {last_error}")
-                # Wait a bit before retrying
-                time.sleep(2)
+                
+                if last_error[0] == -10005: 
+                    logger.warning("IPC Timeout detected. Terminal might be stuck.")
+                    # Don't kill it immediately, maybe it just needs more time?
+                    # But on last attempt, clean up
+                    if attempt == max_retries - 1:
+                         subprocess.run(["killall", "terminal64.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                
+                time.sleep(3)
         except Exception as e:
             last_error = str(e)
             logger.error(f"MT5 initialization attempt {attempt + 1} exception: {e}")
-            time.sleep(2)
+            logger.error(traceback.format_exc())
+            time.sleep(3)
 
     return jsonify({"success": False, "error": f"Failed after {max_retries} attempts. Last error: {last_error}"}), 500
 

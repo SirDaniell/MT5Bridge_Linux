@@ -62,7 +62,8 @@ RUN wget -q https://www.python.org/ftp/python/3.10.11/python-3.10.11-embed-amd64
 # Copy application files
 COPY mt5_bridge.py /app/mt5_bridge.py
 COPY startup.sh /startup.sh
-RUN chmod +x /startup.sh
+COPY install_mt5_gui.sh /install_mt5_gui.sh
+RUN chmod +x /startup.sh /install_mt5_gui.sh
 
 # Create directories
 RUN mkdir -p /var/log/mt5 && \
