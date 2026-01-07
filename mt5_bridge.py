@@ -131,8 +131,8 @@ class CalendarDataReader:
 data_reader = CalendarDataReader(DATA_FOLDER)
 
 
-@app.route("/initialize", methods=["POST"])
-def initialize():
+@app.route("/initialize_", methods=["POST"])
+def _initialize():
     data = request.get_json()
     login = data.get("login")
     password = data.get("password")
@@ -162,14 +162,7 @@ def initialize():
     max_retries = 3
     last_error = None
     
-    # Aggressive Cleanup: Kill any existing terminal processes first
-    try:
-        logger.info("🧹 Pre-init cleanup: Killing existing terminal64.exe processes...")
-        subprocess.run(["killall", "terminal64.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        time.sleep(2) # Give it time to die
-    except Exception as e:
-        logger.warning(f"Cleanup warning: {e}")
-
+    
     for attempt in range(max_retries):
         try:
             logger.info(f"Initializing MT5 (Attempt {attempt + 1}/{max_retries})...")
@@ -255,7 +248,7 @@ def initialize():
                     # Don't kill it immediately, maybe it just needs more time?
                     # But on last attempt, clean up
                     if attempt == max_retries - 1:
-                         subprocess.run(["killall", "terminal64.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                         subprocess.run(["wineserver", "-k"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
                 time.sleep(3)
         except Exception as e:
@@ -265,6 +258,45 @@ def initialize():
             time.sleep(3)
 
     return jsonify({"success": False, "error": f"Failed after {max_retries} attempts. Last error: {last_error}"}), 500
+
+@app.route('/initialize', methods=['POST'])
+
+
+def initialize():
+    data = request.get_json()
+    login = data.get('login')
+    password = data.get('password')
+    server = data.get('server')
+    path = data.get(
+        "path",
+        "/home/wineuser/.wine/drive_c/Program Files/MetaTrader 5/terminal64.exe"
+    )
+    timeout = data.get('timeout', 600)
+    portable = data.get('portable', False)
+
+    if not all([login, password, server]):
+        return jsonify({'success': False, 'error': 'Missing login, password, or server'}), 400
+
+    result = mt5.initialize(
+                            path,                           # path to the MetaTrader 5 terminal EXE file
+                            login=login,                    # account number
+                            password=password,              # password
+                            server=server,                  # server name as it is specified in the terminal
+                            timeout=timeout,                # timeout
+                            portable=portable               # portable mode
+        )
+    
+
+    if result:
+        print(f"MT5 initialized successfully")
+        print(f"MT5 version: {mt5.version()}")
+        print(f"Terminal info: {mt5.terminal_info()}")
+    else:
+        error = mt5.last_error()
+        print(f"MT5 initialization failed: {error}")
+        return jsonify({'success': False, 'error': str(error)})
+    return jsonify({'success': result})
+
 
 
 @app.route("/get_account_info", methods=["GET"])
