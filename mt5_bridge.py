@@ -299,6 +299,18 @@ def initialize():
 
 
 
+@app.route("/shutdown", methods=["POST"])
+def shutdown():
+    """Shuts down the MT5 terminal connection."""
+    try:
+        mt5.shutdown()
+        logger.info("✅ MT5 terminal shutdown successful")
+        return jsonify({"success": True, "message": "MT5 terminal shutdown successful"})
+    except Exception as e:
+        logger.error(f"❌ Shutdown error: {str(e)}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route("/get_account_info", methods=["GET"])
 def get_account_info():
     if not mt5.terminal_info():
