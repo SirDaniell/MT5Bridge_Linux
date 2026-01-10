@@ -18,6 +18,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     ca-certificates \
     wget \
+    curl \
     gnupg2 \
     apt-transport-https \
     && rm -rf /var/lib/apt/lists/*
@@ -27,8 +28,8 @@ RUN dpkg --add-architecture i386
 
 # Add WineHQ repository
 RUN mkdir -pm755 /etc/apt/keyrings && \
-    wget -O /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key && \
-    wget -NP /etc/apt/sources.list.d/ https://dl.winehq.org/wine-builds/debian/dists/bookworm/winehq-bookworm.sources
+    curl -sSL --retry 5 https://dl.winehq.org/wine-builds/winehq.key -o /etc/apt/keyrings/winehq-archive.key && \
+    curl -sSL --retry 5 https://dl.winehq.org/wine-builds/debian/dists/bookworm/winehq-bookworm.sources -o /etc/apt/sources.list.d/winehq-bookworm.sources
 
 # Install Wine and dependencies
 RUN apt-get update && \
@@ -50,14 +51,14 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Winetricks manually
-RUN wget -q https://raw.githubusercontent.com/Winetricks/winetricks/master/src/winetricks -O /usr/local/bin/winetricks && \
+RUN curl -sSL --retry 5 https://raw.githubusercontent.com/Winetricks/winetricks/master/src/winetricks -o /usr/local/bin/winetricks && \
     chmod +x /usr/local/bin/winetricks
 
 WORKDIR /app
 
 # Download Python and pip (will extract at runtime)
-RUN wget -q https://www.python.org/ftp/python/3.10.11/python-3.10.11-embed-amd64.zip -O /app/python.zip && \
-    wget -q https://bootstrap.pypa.io/get-pip.py -O /app/get-pip.py
+RUN curl -sSL --retry 5 https://www.python.org/ftp/python/3.10.11/python-3.10.11-embed-amd64.zip -o /app/python.zip && \
+    curl -sSL --retry 5 https://bootstrap.pypa.io/get-pip.py -o /app/get-pip.py
 
 # Copy application files
 COPY mt5_bridge.py /app/mt5_bridge.py
