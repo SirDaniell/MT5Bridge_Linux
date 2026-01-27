@@ -287,13 +287,29 @@ if [ ! -f "$MT5_PATH" ]; then
             # Launch installer and wait
             wine "$INSTALLER_PATH" &
             INSTALLER_PID=$!
+            
+            echo "⏳ Waiting for installer to finish (PID: $INSTALLER_PID)..."
             wait $INSTALLER_PID 2>/dev/null || true
+            echo "⏹️  MT5 Installer window closed."
             sleep 5
             
             if [ -f "$MT5_PATH" ]; then
                 echo "✅ MT5 installed successfully!"
             else
-                echo "⚠️  MT5 not found. You can install later via /install endpoint"
+                echo "⚠️  MT5 not found after GUI closure."
+                echo "📥 Attempting silent installation as fallback..."
+                wine "$INSTALLER_PATH" /quiet &
+                SILENT_PID=$!
+                
+                # Wait for silent install with timeout
+                timeout 120 bash -c "while [ ! -f '$MT5_PATH' ] && kill -0 $SILENT_PID 2>/dev/null; do sleep 5; done"
+                
+                if [ -f "$MT5_PATH" ]; then
+                    echo "✅ MT5 installed successfully in silent mode!"
+                else
+                    echo "⚠️  Silent installation failed or timed out."
+                    echo "    You can try again later via: POST /install"
+                fi
             fi
         else
             echo "ℹ️  Running in headless mode (Xvfb)"
