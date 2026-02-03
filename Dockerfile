@@ -56,6 +56,13 @@ RUN curl -sSL --retry 5 https://raw.githubusercontent.com/Winetricks/winetricks/
 
 WORKDIR /app
 
+# Download Wine Mono and Gecko
+# We download these to /usr/share/wine/mono and /usr/share/wine/gecko so Wine finds them automatically
+#RUN mkdir -p /usr/share/wine/mono /usr/share/wine/gecko && \
+#    wget https://dl.winehq.org/wine/wine-mono/9.4.0/wine-mono-9.4.0-x86.msi -O /usr/share/wine/mono/wine-mono-9.4.0-x86.msi && \
+#    wget https://dl.winehq.org/wine/wine-gecko/2.47.4/wine-gecko-2.47.4-x86_64.msi -O /usr/share/wine/gecko/wine-gecko-2.47.4-x86_64.msi && \
+#    wget https://dl.winehq.org/wine/wine-gecko/2.47.4/wine-gecko-2.47.4-x86.msi -O /usr/share/wine/gecko/wine-gecko-2.47.4-x86.msi
+
 # Download Python and pip (will extract at runtime)
 RUN curl -sSL --retry 5 https://www.python.org/ftp/python/3.10.11/python-3.10.11-embed-amd64.zip -o /app/python.zip && \
     curl -sSL --retry 5 https://bootstrap.pypa.io/get-pip.py -o /app/get-pip.py
