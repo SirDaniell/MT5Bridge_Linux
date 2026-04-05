@@ -50,9 +50,20 @@ RUN apt-get update && \
     x11-xserver-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Winetricks manually
-RUN curl -sSL --retry 5 https://raw.githubusercontent.com/Winetricks/winetricks/master/src/winetricks -o /usr/local/bin/winetricks && \
-    chmod +x /usr/local/bin/winetricks
+# Install Winetricks manually with robust network error handling
+RUN set -e && \
+    for attempt in 1 2 3; do \
+        echo "Winetricks download attempt $attempt..."; \
+        if curl --max-time 120 --retry 3 --retry-delay 2 --retry-max-time 300 -sSL https://raw.githubusercontent.com/Winetricks/winetricks/master/src/winetricks -o /usr/local/bin/winetricks 2>&1; then \
+            chmod +x /usr/local/bin/winetricks && break; \
+        elif wget --timeout=120 --tries=3 --waitretry=2 -q https://raw.githubusercontent.com/Winetricks/winetricks/master/src/winetricks -O /usr/local/bin/winetricks 2>&1; then \
+            chmod +x /usr/local/bin/winetricks && break; \
+        else \
+            echo "Attempt $attempt failed, retrying..."; \
+            sleep 5; \
+            if [ $attempt -eq 3 ]; then echo "Failed to install Winetricks"; exit 1; fi; \
+        fi; \
+    done
 
 WORKDIR /app
 
@@ -63,9 +74,22 @@ WORKDIR /app
 #    wget https://dl.winehq.org/wine/wine-gecko/2.47.4/wine-gecko-2.47.4-x86_64.msi -O /usr/share/wine/gecko/wine-gecko-2.47.4-x86_64.msi && \
 #    wget https://dl.winehq.org/wine/wine-gecko/2.47.4/wine-gecko-2.47.4-x86.msi -O /usr/share/wine/gecko/wine-gecko-2.47.4-x86.msi
 
-# Download Python and pip (will extract at runtime)
-RUN curl -sSL --retry 5 https://www.python.org/ftp/python/3.10.11/python-3.10.11-embed-amd64.zip -o /app/python.zip && \
-    curl -sSL --retry 5 https://bootstrap.pypa.io/get-pip.py -o /app/get-pip.py
+# Download Python and pip (will extract at runtime) with robust network handling
+RUN set -e && \
+    for attempt in 1 2 3; do \
+        echo "Python/pip download attempt $attempt..."; \
+        if (curl --max-time 600 --retry 3 --retry-delay 2 --retry-max-time 1200 -sSL https://www.python.org/ftp/python/3.10.11/python-3.10.11-embed-amd64.zip -o /app/python.zip && \
+            curl --max-time 120 --retry 3 --retry-delay 2 --retry-max-time 300 -sSL https://bootstrap.pypa.io/get-pip.py -o /app/get-pip.py); then \
+            break; \
+        elif (wget --timeout=600 --tries=3 --waitretry=2 -q https://www.python.org/ftp/python/3.10.11/python-3.10.11-embed-amd64.zip -O /app/python.zip && \
+              wget --timeout=120 --tries=3 --waitretry=2 -q https://bootstrap.pypa.io/get-pip.py -O /app/get-pip.py); then \
+            break; \
+        else \
+            echo "Attempt $attempt failed, retrying in 10s..."; \
+            sleep 10; \
+            if [ $attempt -eq 3 ]; then echo "Failed to download Python/pip"; exit 1; fi; \
+        fi; \
+    done
 
 # Copy application files
 COPY mt5_bridge.py /app/mt5_bridge.py
