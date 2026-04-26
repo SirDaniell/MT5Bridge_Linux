@@ -105,16 +105,26 @@ else
     echo "✅ Wine prefix already exists"
 fi
 
-# Test Wine Functionality
+# Test Wine Functionality — retry up to 3 times, wineserver needs a moment after being killed
 echo "🧪 Testing Wine functionality..."
-if ! wine cmd /c ver &> /dev/null; then
-    echo "❌ Wine is broken or prefix is corrupted."
+WINE_TEST_OK=0
+for attempt in 1 2 3; do
+    if wine cmd /c ver &> /dev/null; then
+        WINE_TEST_OK=1
+        break
+    fi
+    echo "   ⚠️  Wine test attempt $attempt/3 failed, waiting 3s..."
+    sleep 3
+done
+
+if [ "$WINE_TEST_OK" -eq 0 ]; then
+    echo "❌ Wine is broken or prefix is corrupted (failed 3 attempts)."
     echo "🧹 Wiping corrupted prefix..."
-    
+
     wineserver -k9 2>/dev/null || true
     sudo killall -9 wineserver wine wine64 2>/dev/null || true
     rm -rf "$WINEPREFIX"
-    
+
     if [ -d "$WINEPREFIX" ]; then
         echo "❌ Failed to delete prefix. Check permissions."
         exit 1
