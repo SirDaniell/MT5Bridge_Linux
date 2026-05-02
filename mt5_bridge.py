@@ -419,8 +419,13 @@ def copy_rates_from():
         timeframe = timeframe_map.get(timeframe_str, mt5.TIMEFRAME_H1)
 
         try:
-            if date_from_str:
-                date_from = datetime.fromisoformat(date_from_str.replace("Z", "+00:00"))
+            if date_from_str is not None:
+                if isinstance(date_from_str, (int, float)):
+                    date_from = int(date_from_str)
+                elif isinstance(date_from_str, str):
+                    date_from = datetime.fromisoformat(date_from_str.replace("Z", "+00:00"))
+                else:
+                    date_from = datetime.now()
             else:
                 date_from = datetime.now()
         except Exception as e:
@@ -481,8 +486,13 @@ def copy_ticks_from():
         print(f"Processing tick request: symbol={symbol}, count={count}")
 
         try:
-            if date_from_str:
-                date_from = datetime.fromisoformat(date_from_str.replace("Z", "+00:00"))
+            if date_from_str is not None:
+                if isinstance(date_from_str, (int, float)):
+                    date_from = int(date_from_str)
+                elif isinstance(date_from_str, str):
+                    date_from = datetime.fromisoformat(date_from_str.replace("Z", "+00:00"))
+                else:
+                    date_from = datetime.now()
             else:
                 date_from = datetime.now()
         except Exception as e:
