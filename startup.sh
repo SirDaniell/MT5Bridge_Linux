@@ -365,6 +365,7 @@ cd /app
 exec wine "$PYTHON_DIR/python.exe" -m waitress \
     --host=0.0.0.0 \
     --port=5000 \
-    --threads=4 \
+    --threads=32 \
+    --connection-limit=200 \
     --channel-timeout=120 \
     mt5_bridge:app
