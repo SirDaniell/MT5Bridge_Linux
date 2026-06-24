@@ -422,15 +422,11 @@ def copy_rates_from():
             if date_from_str is not None:
                 if isinstance(date_from_str, (int, float)):
                     date_from = int(date_from_str)
-                elif isinstance(date_from_str, str):
-                    date_from = datetime.fromisoformat(date_from_str.replace("Z", "+00:00"))
                 else:
-                    date_from = datetime.now()
-            else:
-                date_from = datetime.now()
+                    date_from = datetime.fromisoformat(date_from_str.replace("Z", "+00:00"))
         except Exception as e:
             return jsonify({"error": f"Invalid date format: {str(e)}"}), 400
-
+            
         if not mt5.terminal_info():
             return jsonify({"error": "MT5 terminal not connected"}), 503
 
@@ -441,7 +437,10 @@ def copy_rates_from():
         if not mt5.symbol_select(symbol, True):
             return jsonify({"error": f"Failed to select symbol {symbol}"}), 500
 
-        rates = mt5.copy_rates_from(symbol, timeframe, date_from, count)
+        if date_from_str is None:
+            rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, count)
+        else:
+            rates = mt5.copy_rates_from(symbol, timeframe, date_from, count)
 
         if rates is None:
             error = mt5.last_error()
@@ -485,18 +484,19 @@ def copy_ticks_from():
 
         print(f"Processing tick request: symbol={symbol}, count={count}")
 
-        try:
-            if date_from_str is not None:
+        if date_from_str is None:
+            # When requesting the latest ticks, we can use a datetime far in the future
+            # or just use the timezone-aware current UTC time
+            from datetime import timezone
+            date_from = datetime.now(timezone.utc)
+        else:
+            try:
                 if isinstance(date_from_str, (int, float)):
                     date_from = int(date_from_str)
-                elif isinstance(date_from_str, str):
-                    date_from = datetime.fromisoformat(date_from_str.replace("Z", "+00:00"))
                 else:
-                    date_from = datetime.now()
-            else:
-                date_from = datetime.now()
-        except Exception as e:
-            return jsonify({"error": f"Invalid date format: {str(e)}"}), 400
+                    date_from = datetime.fromisoformat(date_from_str.replace("Z", "+00:00"))
+            except Exception as e:
+                return jsonify({"error": f"Invalid date format: {str(e)}"}), 400
 
         if not mt5.terminal_info():
             return jsonify({"error": "MT5 terminal not connected"}), 503
