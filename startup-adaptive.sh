@@ -22,11 +22,11 @@ elif [ "$INSTALL_STRATEGY" = "native" ]; then
     echo "Checking for native dependencies..."
     if ! python3 -c "import MetaTrader5" 2>/dev/null; then
         echo "⚠️  MetaTrader5 package not found. Attempting install..."
-        pip3 install MetaTrader5 Flask waitress requests numpy || echo "❌ Install failed"
+        pip3 install MetaTrader5 uvicorn[standard] pydantic requests numpy || echo "❌ Install failed"
     fi
     
     echo "Starting Bridge..."
-    exec python3 -m waitress --host=0.0.0.0 --port=5000 mt5_bridge:app
+    exec python3 -m uvicorn mt5_bridge:app --host 0.0.0.0 --port 5000 --workers 1 --loop asyncio
 else
     echo "❌ Unknown strategy: $INSTALL_STRATEGY"
     exit 1

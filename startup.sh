@@ -253,8 +253,9 @@ install_if_missing() {
 install_if_missing "numpy==1.24.3" "numpy"
 install_if_missing "requests" "requests"
 install_if_missing "MetaTrader5" "MetaTrader5"
-install_if_missing "Flask" "flask"
-install_if_missing "waitress" "waitress"
+install_if_missing "fastapi" "fastapi"
+install_if_missing "uvicorn[standard]" "uvicorn"
+install_if_missing "pydantic" "pydantic"
 
 echo "================================================"
 echo "✅ All Python packages verified"
@@ -362,10 +363,9 @@ echo ""
 echo "🌉 Starting MT5 Bridge server..."
 cd /app
 
-exec wine "$PYTHON_DIR/python.exe" -m waitress \
-    --host=0.0.0.0 \
-    --port=5000 \
-    --threads=32 \
-    --connection-limit=200 \
-    --channel-timeout=120 \
-    mt5_bridge:app
+exec wine "$PYTHON_DIR/python.exe" -m uvicorn \
+    mt5_bridge:app \
+    --host 0.0.0.0 \
+    --port 5000 \
+    --workers 1 \
+    --loop asyncio

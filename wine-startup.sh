@@ -160,4 +160,4 @@ fi
 # Start Bridge
 echo "🌉 Starting Bridge Server..."
 cd /app
-exec wine "$PYTHON_DIR/python.exe" -m waitress --host=0.0.0.0 --port=5000 mt5_bridge:app
+exec wine "$PYTHON_DIR/python.exe" -m uvicorn mt5_bridge:app --host 0.0.0.0 --port 5000 --workers 1 --loop asyncio
