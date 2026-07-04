@@ -9,7 +9,7 @@ Architecture
   run_in_executor  – every route offloads MT5Core calls to a thread-pool executor so
                      the async event-loop is never blocked.
 
-  CalendarDataReader – unchanged logic, now also runs in executor.
+  CalendarDataReader – unchanged logic, now also runs in executor. Still pending Implementation so note Calendar endpoint will not work yet. 
 
   FastAPI routers  – one file, grouped by tag for clean /docs.
 
@@ -919,12 +919,27 @@ app = FastAPI(
 # ---------------------------------------------------------------------------
 
 def _parse_dt(s: str) -> datetime:
-    return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    """
+    Parse an ISO-8601 string (with or without trailing Z / +HH:MM) and return
+    a **naive UTC** datetime.
+
+    Why naive?  The MT5 Python library converts datetimes to Unix timestamps via
+    ``calendar.timegm(dt.timetuple())``.  ``timetuple()`` discards ``tzinfo``, so
+    only the *wall-clock values* matter.  Returning a naive UTC datetime makes the
+    intent explicit and avoids any risk of the library misreading a local-time
+    datetime as UTC.
+
+    Callers must ensure the string represents UTC time (append "Z" before calling).
+    """
+    aware = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    # Strip tzinfo: MT5 API ignores it anyway; naive UTC is unambiguous.
+    return aware.replace(tzinfo=None)
 
 
 def _mt5_check():
     if mt5.terminal_info() is None:
         raise HTTPException(status_code=503, detail="MT5 terminal not connected")
+
 
 
 # ---------------------------------------------------------------------------
@@ -1402,7 +1417,8 @@ async def get_upcoming_values(limit: int = 50):
     data = await in_thread(calendar_reader.get_recent_values)
     if data is None:
         raise HTTPException(status_code=404, detail="Recent values data not available")
-    now = datetime.now()
+    # Use naive UTC — broker calendar timestamps are UTC, so compare apples-to-apples.
+    now = datetime.utcnow()
     upcoming = []
     for v in data.get("values", []):
         try:
@@ -1411,7 +1427,7 @@ async def get_upcoming_values(limit: int = 50):
         except Exception:
             continue
     upcoming.sort(key=lambda x: x.get("time", ""))
-    return {"timestamp": now.isoformat(), "count": len(upcoming), "values": upcoming[:limit]}
+    return {"timestamp": now.isoformat() + "Z", "count": len(upcoming), "values": upcoming[:limit]}
 
 
 @app.get("/calendar/values/high-impact", tags=["calendar"])
