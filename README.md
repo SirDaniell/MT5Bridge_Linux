@@ -153,106 +153,98 @@ Interact with MT5's built-in economic calendar files.
 
 ---
 
-## Python Integration Example
+## Using the Bridge in Your Python App
 
-If you want to communicate with the MT5 Bridge from another Python application, you can build an asynchronous client class using `httpx`. Below is a clean, practical example demonstrating how to initialize the connection, fetch candle data with retries, and retrieve live ticks.
+The bridge works like a drop-in replacement for the official `MetaTrader5` Python library — the only difference is that instead of calling `mt5.copy_rates_from(...)` directly, your code calls the bridge's HTTP endpoint and gets the exact same data back.
+
+Here is how the layers connect:
+
+```
+Your Code
+    ↓  calls  mt5_service.copy_rates_from("EURUSD", "H1", 100)
+MT5Service (mt5_service.py)
+    ↓  sends  POST http://localhost:8217/rates/from
+MT5 Bridge (Docker container)
+    ↓  runs   mt5.copy_rates_from("EURUSD", H1, 100)  ← real Windows MT5 library
+MT5 Terminal (Wine)
+    ↓  queries your broker's server
+Returns candle data all the way back up
+```
+
+### Head Start — Use the Included Service File
+
+We have included a ready-made service client at `mt5_service.py` in this repository. Drop it into your project and you are good to go.
+
+**Install the dependency first:**
+```bash
+pip install httpx
+```
+
+**Then use it like this:**
 
 ```python
 import asyncio
-import httpx
-from datetime import datetime, timezone
+from mt5_service import MT5Service
 
-class MT5BridgeClient:
-    def __init__(self, host: str = "localhost", port: int = 8217):
-        self.base_url = f"http://{host}:{port}"
-        # Configure the HTTP client with generous timeouts (highly recommended for large history queries)
-        self.client = httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=10.0))
-
-    async def close(self):
-        await self.client.aclose()
-
-    async def initialize(self, login: int, password: str, server: str):
-        """Initializes the MT5 terminal and connects to the broker."""
-        url = f"{self.base_url}/initialize"
-        payload = {
-            "login": login,
-            "password": password,
-            "server": server
-        }
-        try:
-            response = await self.client.post(url, json=payload)
-            response.raise_for_status()
-            return response.json()
-        except httpx.RequestError as e:
-            return {"success": False, "error": f"Initialization failed: {e}"}
-
-    async def get_status(self):
-        """Checks if the bridge is running and connected to the broker."""
-        url = f"{self.base_url}/status"
-        try:
-            response = await self.client.get(url)
-            return response.json()
-        except httpx.RequestError:
-            return {"terminal_connected": False, "error": "Bridge offline"}
-
-    async def fetch_ohlcv(self, symbol: str, timeframe: str = "H1", count: int = 100):
-        """Fetches historical OHLCV bar data from the broker."""
-        url = f"{self.base_url}/rates/from"
-        payload = {
-            "symbol": symbol,
-            "timeframe": timeframe,
-            "count": count
-        }
-        try:
-            # The bridge handles requests and offloads them to a safe single-threaded runner
-            response = await self.client.post(url, json=payload)
-            response.raise_for_status()
-            return response.json()  # Returns list of bar lists
-        except httpx.RequestError as e:
-            return {"error": f"Failed to fetch market data: {e}"}
-
-    async def get_latest_ticks(self, symbol: str, count: int = 5):
-        """Fetches the latest real-time ticks for a symbol."""
-        url = f"{self.base_url}/ticks/from"
-        payload = {
-            "symbol": symbol,
-            "count": count
-        }
-        try:
-            response = await self.client.post(url, json=payload)
-            response.raise_for_status()
-            return response.json()
-        except httpx.RequestError as e:
-            return {"error": f"Failed to fetch ticks: {e}"}
-
-# Quick async execution example
 async def main():
-    client = MT5BridgeClient(host="localhost", port=8217)
-    
-    # 1. Check status
-    print("Checking bridge status...")
-    status = await client.get_status()
-    print("Status:", status)
+    # Point the service to wherever your bridge is running.
+    # Default is localhost:8217 (the port mapped in docker-compose.yml)
+    mt5 = MT5Service(host="localhost", port=8217)
 
-    # 2. Connect (Replace with actual demo credentials)
-    # print("Initializing broker connection...")
-    # conn = await client.initialize(login=50098765, password="password123", server="Broker-Demo")
-    # print("Connection result:", conn)
+    # --- Step 1: Connect to your broker ---
+    result = await mt5.initialize_mt5(
+        login=12345678,
+        password="your_password",
+        server="YourBroker-Demo"
+    )
+    print(result)  # {"success": true, ...}
 
-    # 3. Fetch recent candles
-    print("Fetching last 5 EURUSD hourly candles...")
-    candles = await client.fetch_ohlcv("EURUSD", "H1", 5)
-    print("Candles:", candles)
+    # --- Step 2: Fetch candle (bar) data ---
+    # This is equivalent to mt5.copy_rates_from("EURUSD", mt5.TIMEFRAME_H1, 100)
+    # in the native Windows library
+    data = await mt5.fetch_ohlcv_v2("EURUSD", timeframe="H1", count=100)
+    print(data)
+    # Returns a list of bars, each bar is:
+    # [time, open, high, low, close, tick_volume, spread, real_volume]
 
-    # 4. Fetch ticks
-    print("Fetching last 3 ticks for EURUSD...")
-    ticks = await client.get_latest_ticks("EURUSD", 3)
-    print("Ticks:", ticks)
+    # --- Step 3: Get account info ---
+    account = await mt5.get_account_info()
+    print(account)  # {"balance": 10000.0, "equity": ..., "leverage": 100, ...}
 
-    await client.close()
+    # --- Step 4: Get the latest live tick ---
+    ticks = await mt5.get_ticks("EURUSD", count=5)
+    print(ticks)
+    # Each tick is: [time, bid, ask, last, volume, time_msc, flags, volume_real]
 
-if __name__ == "__main__":
-    asyncio.run(main())
+asyncio.run(main())
+```
+
+### Common Operations at a Glance
+
+| What you want to do | Function to call |
+|---|---|
+| Connect to broker | `mt5.initialize_mt5(login, password, server)` |
+| Get account balance | `mt5.get_account_info()` |
+| Get candle history | `mt5.fetch_ohlcv_v2(symbol, timeframe, count)` |
+| Get latest ticks | `mt5.get_ticks(symbol, count)` |
+| Get all symbols | `mt5.get_available_symbols()` |
+| Get symbol details | `mt5.get_symbol_info(symbol)` |
+| Disconnect cleanly | `mt5.shutdown_mt5()` |
+
+### Environment Variables
+
+If your bridge is running on a remote server or inside Docker on the same machine, you can configure the host using environment variables instead of hardcoding them:
+
+```bash
+# Set these in your shell or .env file
+export MT5_HOST=localhost
+export MT5_PORT=8217
+```
+
+The `MT5Service` class reads these automatically, so you do not need to pass `host` and `port` arguments at all:
+
+```python
+mt5 = MT5Service()  # Reads MT5_HOST and MT5_PORT from environment
 ```
 
 ---
