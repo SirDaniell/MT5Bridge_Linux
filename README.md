@@ -153,6 +153,110 @@ Interact with MT5's built-in economic calendar files.
 
 ---
 
+## Python Integration Example
+
+If you want to communicate with the MT5 Bridge from another Python application, you can build an asynchronous client class using `httpx`. Below is a clean, practical example demonstrating how to initialize the connection, fetch candle data with retries, and retrieve live ticks.
+
+```python
+import asyncio
+import httpx
+from datetime import datetime, timezone
+
+class MT5BridgeClient:
+    def __init__(self, host: str = "localhost", port: int = 8217):
+        self.base_url = f"http://{host}:{port}"
+        # Configure the HTTP client with generous timeouts (highly recommended for large history queries)
+        self.client = httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=10.0))
+
+    async def close(self):
+        await self.client.aclose()
+
+    async def initialize(self, login: int, password: str, server: str):
+        """Initializes the MT5 terminal and connects to the broker."""
+        url = f"{self.base_url}/initialize"
+        payload = {
+            "login": login,
+            "password": password,
+            "server": server
+        }
+        try:
+            response = await self.client.post(url, json=payload)
+            response.raise_for_status()
+            return response.json()
+        except httpx.RequestError as e:
+            return {"success": False, "error": f"Initialization failed: {e}"}
+
+    async def get_status(self):
+        """Checks if the bridge is running and connected to the broker."""
+        url = f"{self.base_url}/status"
+        try:
+            response = await self.client.get(url)
+            return response.json()
+        except httpx.RequestError:
+            return {"terminal_connected": False, "error": "Bridge offline"}
+
+    async def fetch_ohlcv(self, symbol: str, timeframe: str = "H1", count: int = 100):
+        """Fetches historical OHLCV bar data from the broker."""
+        url = f"{self.base_url}/rates/from"
+        payload = {
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "count": count
+        }
+        try:
+            # The bridge handles requests and offloads them to a safe single-threaded runner
+            response = await self.client.post(url, json=payload)
+            response.raise_for_status()
+            return response.json()  # Returns list of bar lists
+        except httpx.RequestError as e:
+            return {"error": f"Failed to fetch market data: {e}"}
+
+    async def get_latest_ticks(self, symbol: str, count: int = 5):
+        """Fetches the latest real-time ticks for a symbol."""
+        url = f"{self.base_url}/ticks/from"
+        payload = {
+            "symbol": symbol,
+            "count": count
+        }
+        try:
+            response = await self.client.post(url, json=payload)
+            response.raise_for_status()
+            return response.json()
+        except httpx.RequestError as e:
+            return {"error": f"Failed to fetch ticks: {e}"}
+
+# Quick async execution example
+async def main():
+    client = MT5BridgeClient(host="localhost", port=8217)
+    
+    # 1. Check status
+    print("Checking bridge status...")
+    status = await client.get_status()
+    print("Status:", status)
+
+    # 2. Connect (Replace with actual demo credentials)
+    # print("Initializing broker connection...")
+    # conn = await client.initialize(login=50098765, password="password123", server="Broker-Demo")
+    # print("Connection result:", conn)
+
+    # 3. Fetch recent candles
+    print("Fetching last 5 EURUSD hourly candles...")
+    candles = await client.fetch_ohlcv("EURUSD", "H1", 5)
+    print("Candles:", candles)
+
+    # 4. Fetch ticks
+    print("Fetching last 3 ticks for EURUSD...")
+    ticks = await client.get_latest_ticks("EURUSD", 3)
+    print("Ticks:", ticks)
+
+    await client.close()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+---
+
 ## Troubleshooting
 
 ### 1. IPC Timeout Error
