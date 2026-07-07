@@ -303,10 +303,16 @@ class MT5Core:
     ) -> list:
         tf = self._resolve_timeframe(timeframe)
         self._ensure_symbol(symbol)
-        rates = mt5.copy_rates_from(symbol, tf, date_from, count)
-        if rates is None:
-            raise RuntimeError(f"copy_rates_from failed: {mt5.last_error()}")
-        return rates.tolist()
+        # MT5 can return None transiently when the terminal is busy (e.g. during
+        # concurrent requests routed through the single-thread executor).
+        # Retry up to 3 times with short back-off before raising.
+        for attempt in range(3):
+            rates = mt5.copy_rates_from(symbol, tf, date_from, count)
+            if rates is not None:
+                return rates.tolist()
+            if attempt < 2:
+                time.sleep(0.5)
+        raise RuntimeError(f"copy_rates_from failed after 3 attempts: {mt5.last_error()}")
 
     def copy_rates_from_pos(
         self,
@@ -688,9 +694,17 @@ class MT5Core:
     # ------------------------------------------------------------------
 
     def _ensure_symbol(self, symbol: str) -> None:
-        if mt5.symbol_info(symbol) is None:
-            raise RuntimeError(f"Symbol '{symbol}' not found")
-        mt5.symbol_select(symbol, True)
+        # MT5's COM/Wine layer occasionally returns None on the first call when
+        # the terminal is busy processing a previous request.  Retry a few times
+        # with a short sleep before giving up so transient load doesn't cause 500s.
+        for attempt in range(3):
+            info = mt5.symbol_info(symbol)
+            if info is not None:
+                mt5.symbol_select(symbol, True)
+                return
+            if attempt < 2:
+                time.sleep(0.3)
+        raise RuntimeError(f"Symbol '{symbol}' not found (3 attempts, last error: {mt5.last_error()})")
 
     def _ensure_connected(self) -> None:
         if mt5.terminal_info() is None:
