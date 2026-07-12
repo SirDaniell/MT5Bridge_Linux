@@ -304,10 +304,14 @@ class MT5Core:
         tf = self._resolve_timeframe(timeframe)
         self._ensure_symbol(symbol)
         
-        # Clamp count to terminal maxbars to prevent "Invalid params" (-2) in recent MT5 updates
+        # Clamp count to terminal maxbars and available series bars to prevent "Invalid params" (-2)
         term_info = mt5.terminal_info()
         if term_info is not None and hasattr(term_info, 'maxbars') and term_info.maxbars > 0:
             count = min(count, term_info.maxbars)
+            
+        series_info = mt5.series_info(symbol, tf)
+        if series_info is not None and hasattr(series_info, 'bars_count') and series_info.bars_count > 0:
+            count = min(count, series_info.bars_count)
             
         # MT5 can return None transiently when the terminal is busy (e.g. during
         # concurrent requests routed through the single-thread executor).
@@ -330,10 +334,14 @@ class MT5Core:
         tf = self._resolve_timeframe(timeframe)
         self._ensure_symbol(symbol)
         
-        # Clamp count to terminal maxbars to prevent "Invalid params" (-2) in recent MT5 updates
+        # Clamp count to terminal maxbars and available series bars to prevent "Invalid params" (-2)
         term_info = mt5.terminal_info()
         if term_info is not None and hasattr(term_info, 'maxbars') and term_info.maxbars > 0:
             count = min(count, term_info.maxbars)
+            
+        series_info = mt5.series_info(symbol, tf)
+        if series_info is not None and hasattr(series_info, 'bars_count') and series_info.bars_count > 0:
+            count = min(count, series_info.bars_count)
             
         rates = mt5.copy_rates_from_pos(symbol, tf, start_pos, count)
         if rates is None:
