@@ -303,6 +303,12 @@ class MT5Core:
     ) -> list:
         tf = self._resolve_timeframe(timeframe)
         self._ensure_symbol(symbol)
+        
+        # Clamp count to terminal maxbars to prevent "Invalid params" (-2) in recent MT5 updates
+        term_info = mt5.terminal_info()
+        if term_info is not None and hasattr(term_info, 'maxbars') and term_info.maxbars > 0:
+            count = min(count, term_info.maxbars)
+            
         # MT5 can return None transiently when the terminal is busy (e.g. during
         # concurrent requests routed through the single-thread executor).
         # Retry up to 3 times with short back-off before raising.
@@ -323,6 +329,12 @@ class MT5Core:
     ) -> list:
         tf = self._resolve_timeframe(timeframe)
         self._ensure_symbol(symbol)
+        
+        # Clamp count to terminal maxbars to prevent "Invalid params" (-2) in recent MT5 updates
+        term_info = mt5.terminal_info()
+        if term_info is not None and hasattr(term_info, 'maxbars') and term_info.maxbars > 0:
+            count = min(count, term_info.maxbars)
+            
         rates = mt5.copy_rates_from_pos(symbol, tf, start_pos, count)
         if rates is None:
             raise RuntimeError(f"copy_rates_from_pos failed: {mt5.last_error()}")
