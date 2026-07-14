@@ -1113,11 +1113,16 @@ async def copy_rates_range(body: RatesRangeRequest):
 async def copy_ticks_from(body: TicksFromRequest):
     _mt5_check()
     try:
-        # Mirror old Flask logic: accept unix timestamp (int/float), ISO string, or None
+        # Accept unix timestamp (int/float), ISO string, or None.
+        # Always convert to a naive UTC datetime before passing to MT5.
+        # MT5's copy_ticks_from interprets the datetime wall-clock values as UTC,
+        # so we must strip tzinfo after resolving to UTC — same as _parse_dt does.
         if body.date_from is None:
-            date_from = datetime.now(timezone.utc)
+            # No start: use current UTC time, naive
+            date_from = datetime.now(timezone.utc).replace(tzinfo=None)
         elif isinstance(body.date_from, (int, float)):
-            date_from = int(body.date_from)
+            # Unix seconds → naive UTC datetime (NOT fromtimestamp which uses local tz)
+            date_from = datetime.utcfromtimestamp(float(body.date_from))
         else:
             date_from = _parse_dt(str(body.date_from))
         data = await in_thread(
