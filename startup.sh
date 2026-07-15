@@ -360,6 +360,21 @@ Profile=1
 EOF
 
 echo ""
+echo "🌉 Pre-launching MT5 terminal for IPC warm-up..."
+MT5_EXE="$WINEPREFIX/drive_c/Program Files/MetaTrader 5/terminal64.exe"
+if [ -f "$MT5_EXE" ]; then
+    # Launch terminal in the background so the MT5 Python library can connect via IPC.
+    # The /portable flag keeps it self-contained; credentials are supplied at /initialize time.
+    wine "$MT5_EXE" /portable &
+    MT5_PID=$!
+    echo "   Terminal PID: $MT5_PID — waiting 20s for IPC layer to come up..."
+    sleep 20
+    echo "✅ MT5 terminal pre-launched"
+else
+    echo "ℹ️  MT5 terminal not installed yet — skipping pre-launch (install via POST /install)"
+fi
+
+echo ""
 echo "🌉 Starting MT5 Bridge server..."
 cd /app
 

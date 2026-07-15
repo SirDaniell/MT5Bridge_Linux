@@ -127,17 +127,20 @@ class MT5Core:
             return {"success": True, "message": "Already installed", "path": terminal_unix_path, "installed": True}
 
         installer_url = "https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe"
-        installer_path = f"{wine_prefix}/drive_c/temp/mt5setup.exe"
-        os.makedirs(os.path.dirname(installer_path), exist_ok=True)
+        installer_unix_path = f"{wine_prefix}/drive_c/temp/mt5setup.exe"
+        os.makedirs(os.path.dirname(installer_unix_path), exist_ok=True)
 
         resp = requests.get(installer_url, stream=True, timeout=300)
         resp.raise_for_status()
-        with open(installer_path, "wb") as f:
+        with open(installer_unix_path, "wb") as f:
             for chunk in resp.iter_content(chunk_size=8192):
                 f.write(chunk)
 
+        # Running inside Wine — use a Windows path for the subprocess call.
+        # subprocess here invokes a Windows executable natively within the Wine instance.
+        installer_win_path = "C:\\temp\\mt5setup.exe"
         subprocess.Popen(
-            ["wine", installer_path],
+            [installer_win_path],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
@@ -158,8 +161,21 @@ class MT5Core:
         timeout: int = 600,
         portable: bool = False,
     ) -> dict:
+        # Inside Wine (Windows Python), os.path.exists uses Wine's VFS.
+        # The path is already a Wine Unix path that maps to C:\Program Files\MetaTrader 5\terminal64.exe.
+        # We check it but don't need to translate it — mt5.initialize() handles it natively.
         if not os.path.exists(path):
             raise FileNotFoundError(f"MT5 executable not found at {path}")
+
+        # mt5.initialize() expects a Windows path when running inside Wine.
+        # Convert the Unix-style Wine path to a Windows path (C:\...).
+        win_path = path
+        if path.startswith("/home/wineuser/.wine/drive_c/"):
+            win_path = "C:\\" + path[len("/home/wineuser/.wine/drive_c/"):].replace("/", "\\")
+        elif "/drive_c/" in path:
+            win_path = "C:\\" + path.split("/drive_c/", 1)[1].replace("/", "\\")
+
+        logger.info("MT5 terminal path (Windows): %s", win_path)
 
         max_retries = 3
         last_error: Any = None
@@ -168,29 +184,15 @@ class MT5Core:
             try:
                 logger.info("MT5 init attempt %d/%d", attempt + 1, max_retries)
 
+                # NOTE: This Python process runs *inside* Wine, so there is no "wine"
+                # binary available. The MT5 terminal is a native Windows app in the same
+                # Wine instance — mt5.initialize() will launch it directly via the MT5
+                # Python library's built-in IPC mechanism.  No subprocess needed.
                 if attempt == 0:
-                    logger.info("Launching terminal process via Wine …")
-                    launch_cmd = [
-                        "wine", path, "/portable",
-                        f"/login:{login}", f"/password:{password}", f"/server:{server}",
-                    ]
-                    config_path = os.path.join(
-                        os.path.dirname(os.path.dirname(path)), "config", "common.ini"
-                    )
-                    if os.path.exists(config_path):
-                        launch_cmd.append(f"/config:{config_path}")
-
-                    subprocess.Popen(
-                        launch_cmd,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        start_new_session=True,
-                    )
-                    logger.info("Waiting 15s for Wine warm-up …")
-                    time.sleep(15)
+                    logger.info("Calling mt5.initialize() — terminal will be launched by the MT5 library …")
 
                 result = mt5.initialize(
-                    path, login=login, password=password,
+                    win_path, login=login, password=password,
                     server=server, timeout=timeout, portable=True,
                 )
 
@@ -208,18 +210,12 @@ class MT5Core:
 
                 last_error = mt5.last_error()
                 logger.warning("Init attempt %d failed: %s", attempt + 1, last_error)
-                if last_error[0] == -10005 and attempt == max_retries - 1:
-                    subprocess.run(
-                        ["wineserver", "-k"],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                    )
-                time.sleep(3)
+                time.sleep(5)
 
             except Exception as exc:
                 last_error = str(exc)
                 logger.error("Init attempt %d exception: %s", attempt + 1, exc)
-                time.sleep(3)
+                time.sleep(5)
 
         return {"success": False, "error": f"Failed after {max_retries} attempts. Last error: {last_error}"}
 
